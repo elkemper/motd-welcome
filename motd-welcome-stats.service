@@ -1,0 +1,8 @@
+[Unit]
+Description=Collect Docker container stats for motd-welcome
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/motd-welcome-stats
+Nice=10

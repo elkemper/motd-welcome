@@ -4,11 +4,14 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 renderer="$here/motd-welcome.sh"
 checker="$here/motd-welcome-update-check.sh"
+collector="$here/motd-welcome-stats.sh"
 real_timeout=$(command -v timeout)
 
 command -v jq >/dev/null 2>&1 || { printf 'jq is required\n' >&2; exit 1; }
+command -v flock >/dev/null 2>&1 || { printf 'flock is required\n' >&2; exit 1; }
 [[ -x "$renderer" ]] || { printf 'missing %s\n' "$renderer" >&2; exit 1; }
 [[ -x "$checker" ]] || { printf 'missing %s\n' "$checker" >&2; exit 1; }
+[[ -x "$collector" ]] || { printf 'missing %s\n' "$collector" >&2; exit 1; }
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -30,7 +33,7 @@ assert_not_contains() {
 }
 
 line_of() {
-  printf '%s\n' "$1" | grep -F "● $2 " | head -n1 || true
+  printf '%s\n' "$1" | grep -F "● $2" | head -n1 || true
 }
 
 cat > "$FIX/ids.txt" <<'IDS'
@@ -464,7 +467,7 @@ cat > "$FIX/inspect.json" <<'INSPECT'
   },
   {
     "Id": "e1c7a2ca047a0bb9d5fad14eac68e260a3c1ea91e76107800976d2dd6ef58d03",
-    "Name": "/app-homelab-lib-1",
+    "Name": "/app-homelab-lib-1-super-long-name",
     "Config": {
       "Image": "exampleuser/homelab-lib:latest",
       "ExposedPorts": {
@@ -802,11 +805,13 @@ jq empty "$FIX/cache.json" || fail "embedded cache is invalid"
 
 export PATH="$FIX/bin:$PATH"
 
-out=$(MOTD_WELCOME_CACHE="$FIX/cache.json" "$renderer")
+out=$(MOTD_WELCOME_CACHE="$FIX/cache.json" MOTD_WELCOME_STATS_CACHE="$FIX/stats.tsv" "$renderer")
 clean=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
 
 assert_contains "$clean" "testhost | 192.0.2.10" "banner host/ip"
 assert_contains "$clean" "tailscale serve" "tailscale header"
+assert_contains "$clean" "0.07%" "cached cpu"
+assert_contains "$clean" "175.1MiB" "cached mem"
 
 plex=$(line_of "$clean" plex)
 assert_contains "$plex" "32400 +2" "plex ports"
@@ -845,6 +850,8 @@ assert_contains "$lidarr_ru" "8687" "lidarr_ru mapped port"
 
 lib=$(line_of "$clean" app-homelab-lib-1)
 assert_contains "$lib" "3214" "homelab-lib port"
+assert_contains "$lib" "app-homelab-lib-1-su.." "long name truncation"
+[[ ${#radarr} -eq ${#lib} ]] || fail "row alignment with long name"
 
 ersatz=$(line_of "$clean" ersatztv)
 assert_contains "$ersatz" "8409" "ersatztv port"
@@ -858,9 +865,13 @@ qbit_ts=$(printf '%s\n' "$clean" | grep -F 'qbit' | grep -F '9092' | head -n1 ||
 assert_contains "$qbit_ts" "https://qbit.tailnet.example.ts.net" "qbit url"
 assert_contains "$out" $'\033[32m●\033[0m books' "books reachable"
 
-nocache=$(MOTD_WELCOME_CACHE="$FIX/none.json" "$renderer")
+nocache=$(MOTD_WELCOME_CACHE="$FIX/none.json" MOTD_WELCOME_STATS_CACHE="$FIX/stats.tsv" "$renderer")
 cleannc=$(printf '%s\n' "$nocache" | sed 's/\x1b\[[0-9;]*m//g')
 assert_not_contains "$cleannc" "↑ new" "no updates without cache"
+
+nostats=$(MOTD_WELCOME_CACHE="$FIX/cache.json" MOTD_WELCOME_STATS_CACHE="$FIX/none.tsv" "$renderer")
+cleanns=$(printf '%s\n' "$nostats" | sed 's/\x1b\[[0-9;]*m//g')
+assert_not_contains "$cleanns" "0.07%" "no stats without cache"
 
 mkdir -p "$FIX/cache"
 printf '{"checked_at":"2000-01-01T00:00:00Z","images":{"stale/image:latest":{"digests":["sha256:dead"]}}}\n' \
@@ -884,6 +895,16 @@ for img in "lscr.io/linuxserver/radarr:latest" "lscr.io/linuxserver/sonarr:lates
   [[ "$actual" == "$expected" ]] || fail "digest for $img"
 done
 
+mkdir -p "$FIX/collector"
+MOTD_WELCOME_CACHE_DIR="$FIX/collector" MOTD_WELCOME_STATS_CACHE="$FIX/collector/stats.tsv" "$collector"
+stats_cache="$FIX/collector/stats.tsv"
+[[ -f "$stats_cache" ]] || fail "stats cache missing"
+[[ "$(stat -c %a "$stats_cache")" == "644" ]] || fail "stats cache mode"
+[[ "$(grep -c . "$stats_cache")" -eq 16 ]] || fail "stats cache line count"
+grep -q $'\t0.07%\t' "$stats_cache" || fail "stats cache content"
+[[ -z "$(find "$FIX/collector" -maxdepth 1 -name '.stats.tmp.*' -print -quit)" ]] || fail "stats temp leftover"
+
 ok "renderer"
 ok "missing cache"
 ok "update-check"
+ok "stats"
