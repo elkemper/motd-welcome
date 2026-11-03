@@ -30,7 +30,7 @@ Clone repo:
 ```bash
 git clone https://github.com/elkemper/motd-welcome.git
 ```
-__Alternative: download zip from repo and extract in wherever you want__
+_Alternative: download zip from repo and extract in wherever you want_
 
 Run the install script as root:
 ```bash
