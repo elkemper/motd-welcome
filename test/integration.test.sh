@@ -2,9 +2,10 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-renderer="$here/motd-welcome.sh"
-checker="$here/motd-welcome-update-check.sh"
-collector="$here/motd-welcome-stats.sh"
+root=$(cd "$here/.." && pwd)
+renderer="$root/src/motd-welcome.sh"
+checker="$root/src/motd-welcome-update-check.sh"
+collector="$root/src/motd-welcome-stats.sh"
 real_timeout=$(command -v timeout)
 
 command -v jq >/dev/null 2>&1 || { printf 'jq is required\n' >&2; exit 1; }
@@ -727,18 +728,21 @@ case "${1:-}" in
   image)
     cat "$FIX/image-inspect.json"
     ;;
+  buildx)
+    if [[ "${2:-} ${3:-}" == "version " ]]; then
+      exit 0
+    fi
+    if [[ "${2:-} ${3:-}" == "imagetools inspect" ]]; then
+      img="${!#}"
+      awk -F'\t' -v img="$img" '$1 == img { print $2; found=1; exit } END { exit found ? 0 : 1 }' "$FIX/remote.tsv"
+      exit
+    fi
+    exit 1
+    ;;
   *)
     exit 1
     ;;
 esac
-STUB
-
-cat > "$FIX/bin/regctl" <<'STUB'
-#!/usr/bin/env bash
-set -euo pipefail
-[[ "${1:-} ${2:-}" == "image digest" ]] || exit 1
-img="${3:-}"
-awk -F'\t' -v img="$img" '$1 == img { print $2; found=1; exit } END { exit found ? 0 : 1 }' "$FIX/remote.tsv"
 STUB
 
 cat > "$FIX/bin/tailscale" <<'STUB'
@@ -873,11 +877,19 @@ nostats=$(MOTD_WELCOME_CACHE="$FIX/cache.json" MOTD_WELCOME_STATS_CACHE="$FIX/no
 cleanns=$(printf '%s\n' "$nostats" | sed 's/\x1b\[[0-9;]*m//g')
 assert_not_contains "$cleanns" "0.07%" "no stats without cache"
 
+locale_out=$(LC_ALL=C MOTD_WELCOME_CACHE="$FIX/cache.json" MOTD_WELCOME_STATS_CACHE="$FIX/stats.tsv" "$renderer")
+locale_clean=$(printf '%s\n' "$locale_out" | sed 's/\x1b\[[0-9;]*m//g')
+locale_radarr=$(line_of "$locale_clean" radarr)
+locale_ffmpeg=$(line_of "$locale_clean" ffmpeg-vaapi)
+radarr_len=$(printf '%s' "$locale_radarr" | LC_ALL=C.UTF-8 wc -m)
+ffmpeg_len=$(printf '%s' "$locale_ffmpeg" | LC_ALL=C.UTF-8 wc -m)
+[[ "$radarr_len" -eq "$ffmpeg_len" ]] || fail "locale row alignment"
+
 mkdir -p "$FIX/cache"
 printf '{"checked_at":"2000-01-01T00:00:00Z","images":{"stale/image:latest":{"digests":["sha256:dead"]}}}\n' \
   > "$FIX/cache/images.json"
 
-MOTD_WELCOME_CACHE_DIR="$FIX/cache" "$checker"
+MOTD_WELCOME_CACHE_DIR="$FIX/cache" "$checker" 2>"$FIX/checker.err"
 
 cache="$FIX/cache/images.json"
 jq empty "$cache" || fail "generated cache is invalid json"

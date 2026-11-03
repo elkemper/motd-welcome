@@ -7,4 +7,6 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=/usr/local/bin/motd-welcome-update-check
 Nice=10
+KillMode=control-group
+TimeoutStopSec=10
 IOSchedulingClass=idle

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+export LC_ALL=C.UTF-8
+
 CACHE_FILE="${MOTD_WELCOME_CACHE:-/var/cache/motd-welcome/images.json}"
 STATS_FILE="${MOTD_WELCOME_STATS_CACHE:-/var/cache/motd-welcome/stats.tsv}"
 NOW=$(date +%s)
