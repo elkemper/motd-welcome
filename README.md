@@ -26,8 +26,15 @@ tailscale serve
 - `tailscale` for the `tailscale serve` section (optional)
 
 ## Installation
+Clone repo:
+```bash
+git clone https://github.com/elkemper/motd-welcome.git
+```
+__Alternative: download zip from repo and extract in wherever you want__
+
 Run the install script as root:
 ```bash
+cd motd-welcome
 sudo ./install.sh
 ```
 
